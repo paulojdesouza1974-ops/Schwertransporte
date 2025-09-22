@@ -1,0 +1,507 @@
+import 'package:flutter/material.dart';
+
+// ------------------------------------------------------------
+// Flutter single-file MVP for Heavy Transport Routing & Feasibility
+// - Material 3 UI
+// - Mock data & simple rules (replace with real APIs later)
+// - One-screen app with input form + result panel + mock list
+// ------------------------------------------------------------
+
+void main() => runApp(const HeavyTransportApp());
+
+class HeavyTransportApp extends StatelessWidget {
+  const HeavyTransportApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF0F172A),
+        useMaterial3: true,
+        brightness: Brightness.light,
+      ),
+      home: const HomePage(),
+    );
+  }
+}
+
+class Restriction {
+  final String id;
+  final String type; // bridge | roadwork | event
+  final String title;
+  final String region; // e.g. de-nw
+  final String location;
+  final String status; // closed | restricted | ok
+  final DateTime validFrom;
+  final DateTime validTo;
+  final double? maxWeightTons;
+  final double? maxHeightM;
+  final String note;
+
+  const Restriction({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.region,
+    required this.location,
+    required this.status,
+    required this.validFrom,
+    required this.validTo,
+    this.maxWeightTons,
+    this.maxHeightM,
+    required this.note,
+  });
+}
+
+const regions = [
+  ['de-bw', 'Baden-Württemberg'],
+  ['de-by', 'Bayern'],
+  ['de-be', 'Berlin'],
+  ['de-bb', 'Brandenburg'],
+  ['de-hb', 'Bremen'],
+  ['de-hh', 'Hamburg'],
+  ['de-he', 'Hessen'],
+  ['de-mv', 'Mecklenburg-Vorpommern'],
+  ['de-ni', 'Niedersachsen'],
+  ['de-nw', 'Nordrhein-Westfalen'],
+  ['de-rp', 'Rheinland-Pfalz'],
+  ['de-sl', 'Saarland'],
+  ['de-sn', 'Sachsen'],
+  ['de-st', 'Sachsen-Anhalt'],
+  ['de-sh', 'Schleswig-Holstein'],
+  ['de-th', 'Thüringen'],
+];
+
+final mockRestrictions = <Restriction>[
+  Restriction(
+    id: 'bridge-123',
+    type: 'bridge',
+    title: 'Brücke A45 Lüdenscheid',
+    region: 'de-nw',
+    location: 'A45 km 32',
+    status: 'closed',
+    validFrom: DateTime(2025, 9, 1),
+    validTo: DateTime(2025, 10, 15),
+    maxWeightTons: 30,
+    maxHeightM: 4.2,
+    note: 'Sanierungsarbeiten, nächtliche Vollsperrungen 22–5 Uhr',
+  ),
+  Restriction(
+    id: 'road-781',
+    type: 'roadwork',
+    title: 'Baustelle B10 Pforzheim',
+    region: 'de-bw',
+    location: 'B10 km 14-18',
+    status: 'restricted',
+    validFrom: DateTime(2025, 8, 20),
+    validTo: DateTime(2025, 11, 30),
+    note: 'Engstellen, Begleitfahrzeug empfohlen',
+  ),
+  Restriction(
+    id: 'city-berlin-evt',
+    type: 'event',
+    title: 'Großdemonstration Innenstadt',
+    region: 'de-be',
+    location: 'Mitte/Potsdamer Platz',
+    status: 'restricted',
+    validFrom: DateTime(2025, 9, 22),
+    validTo: DateTime(2025, 9, 23),
+    note: 'Kurzfristige Umleitungen, Polizeiauflagen',
+  ),
+  Restriction(
+    id: 'bridge-555',
+    type: 'bridge',
+    title: 'Elbbrücke A1',
+    region: 'de-hh',
+    location: 'A1 km 195',
+    status: 'ok',
+    validFrom: DateTime(2025, 1, 1),
+    validTo: DateTime(2025, 12, 31),
+    maxWeightTons: 48,
+    maxHeightM: 4.1,
+    note: 'Regelmäßige Kontrollen',
+  ),
+];
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  String origin = 'Duisburg, NRW';
+  String destination = 'Berlin, Mitte';
+  String region = 'de-nw';
+  DateTime date = DateTime.now();
+  bool nightMove = false;
+
+  double heightM = 4.2;
+  double widthM = 3.1;
+  double lengthM = 18.0;
+  double grossWeightTons = 55;
+  double axleLoadTons = 12;
+
+  @override
+  Widget build(BuildContext context) {
+    final feasibility = _checkFeasibility(
+      heightM: heightM,
+      widthM: widthM,
+      lengthM: lengthM,
+      grossWeightTons: grossWeightTons,
+      axleLoadTons: axleLoadTons,
+      region: region,
+      date: date,
+      nightMove: nightMove,
+    );
+
+    final verdict = feasibility['verdict'] as String;
+    final score = feasibility['score'] as int;
+    final conflicts = feasibility['conflicts'] as List<Restriction>;
+
+    final Color verdictColor = switch (verdict) {
+      'ok' => Colors.green.shade600,
+      'caution' => Colors.amber.shade700,
+      _ => Colors.red.shade600,
+    };
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Schwertransport – Routing & Durchführbarkeit'),
+        centerTitle: false,
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth > 1000;
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: isWide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 380, child: _buildForm(context)),
+                      const SizedBox(width: 16),
+                      Expanded(child: _buildResults(verdict, score, verdictColor, conflicts)),
+                    ],
+                  )
+                : ListView(
+                    children: [
+                      _buildForm(context),
+                      const SizedBox(height: 16),
+                      _buildResults(verdict, score, verdictColor, conflicts),
+                    ],
+                  ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildForm(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Route planen', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _textField('Start', origin, (v) => setState(() => origin = v)),
+            const SizedBox(height: 8),
+            _textField('Ziel', destination, (v) => setState(() => destination = v)),
+            const SizedBox(height: 12),
+
+            Row(children: [
+              Expanded(
+                child: _regionDropdown(),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _datePicker(context),
+              ),
+            ]),
+
+            const Divider(height: 24),
+
+            Row(children: [
+              Expanded(child: _numField('Höhe (m)', heightM, (v) => setState(()=> heightM = v))),
+              const SizedBox(width: 12),
+              Expanded(child: _numField('Breite (m)', widthM, (v) => setState(()=> widthM = v))),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _numField('Länge (m)', lengthM, (v) => setState(()=> lengthM = v))),
+              const SizedBox(width: 12),
+              Expanded(child: _numField('Gesamtgewicht (t)', grossWeightTons, (v) => setState(()=> grossWeightTons = v))),
+            ]),
+            const SizedBox(height: 8),
+            _numField('Achslast (t)', axleLoadTons, (v) => setState(()=> axleLoadTons = v)),
+
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Nachtfahrt (22–5 Uhr)'),
+                Switch(
+                  value: nightMove,
+                  onChanged: (v) => setState(() => nightMove = v),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.search),
+              label: const Text('Durchführbarkeit prüfen'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResults(String verdict, int score, Color verdictColor, List<Restriction> conflicts) {
+    return Column(
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.speed, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Durchführbarkeit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: verdictColor.withOpacity(.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: verdictColor.withOpacity(.5)),
+                      ),
+                      child: Text('Score: $score', style: TextStyle(color: verdictColor, fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 8),
+                    _verdictChip(verdict),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text('Mock-Regeln basierend auf Region/Datum/Brücken- & Eventbeschränkungen.'),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: const [Icon(Icons.notifications), SizedBox(width: 8), Text('Kritische Punkte', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600))]),
+                const SizedBox(height: 8),
+                if (conflicts.isEmpty)
+                  const Text('Keine Konflikte in den Mock-Daten.', style: TextStyle(color: Colors.black54))
+                else
+                  ...conflicts.map(_restrictionTile),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: const [Icon(Icons.lightbulb_outline), SizedBox(width: 8), Text('Empfehlung', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600))]),
+                const SizedBox(height: 8),
+                ..._recommendation(verdict),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _restrictionTile(Restriction r) {
+    final color = switch (r.status) {
+      'closed' => Colors.red.shade600,
+      'restricted' => Colors.amber.shade700,
+      _ => Colors.green.shade700,
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withOpacity(.1),
+              border: Border.all(color: color.withOpacity(.4)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              r.status.toUpperCase(),
+              style: TextStyle(color: color, fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(r.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text('${r.location} · gültig ${_fmt(r.validFrom)} – ${_fmt(r.validTo)}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 4),
+                Text(r.note, style: const TextStyle(fontSize: 13)),
+                if (r.type == 'bridge')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('max. ${r.maxHeightM ?? '-'} m / ${r.maxWeightTons ?? '-'} t', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  ),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _regionDropdown() {
+    return DropdownButtonFormField<String>(
+      value: region,
+      items: [
+        for (final r in regions)
+          DropdownMenuItem(value: r[0], child: Text(r[1]))
+      ],
+      onChanged: (v) => setState(() => region = v ?? region),
+      decoration: const InputDecoration(labelText: 'Bundesland / Region', border: OutlineInputBorder()),
+    );
+  }
+
+  Widget _datePicker(BuildContext context) {
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date,
+          firstDate: DateTime(2024),
+          lastDate: DateTime(2027),
+        );
+        if (picked != null) setState(() => date = picked);
+      },
+      child: InputDecorator(
+        decoration: const InputDecoration(labelText: 'Datum', border: OutlineInputBorder()),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today, size: 18),
+            const SizedBox(width: 8),
+            Text(_fmt(date)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _textField(String label, String value, ValueChanged<String> onChanged) {
+    return TextFormField(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _numField(String label, double value, ValueChanged<double> onChanged) {
+    return TextFormField(
+      initialValue: value.toString(),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+      onChanged: (v) => onChanged(double.tryParse(v.replaceAll(',', '.')) ?? value),
+    );
+  }
+
+  Widget _verdictChip(String verdict) {
+    final (text, color) = switch (verdict) {
+      ('ok') => ('OK', Colors.green.shade100),
+      ('caution') => ('VORSICHT', Colors.amber.shade100),
+      _ => ('BLOCKIERT', Colors.red.shade100),
+    };
+    final tColor = switch (verdict) {
+      ('ok') => Colors.green.shade700,
+      ('caution') => Colors.amber.shade800,
+      _ => Colors.red.shade700,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20), border: Border.all(color: tColor.withOpacity(.4))),
+      child: Text(text, style: TextStyle(color: tColor, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Map<String, Object> _checkFeasibility({
+    required double heightM,
+    required double widthM,
+    required double lengthM,
+    required double grossWeightTons,
+    required double axleLoadTons,
+    required String region,
+    required DateTime date,
+    required bool nightMove,
+  }) {
+    final conflicts = mockRestrictions.where((r) {
+      if (r.region != region) return false;
+      final inWindow = date.isAfter(r.validFrom.subtract(const Duration(days: 1))) && date.isBefore(r.validTo.add(const Duration(days: 1)));
+      if (!inWindow) return false;
+
+      if (r.type == 'bridge') {
+        if (r.maxHeightM != null && heightM > r.maxHeightM!) return true;
+        if (r.maxWeightTons != null && grossWeightTons > r.maxWeightTons!) return true;
+        return r.status == 'closed';
+      }
+      if (r.type == 'roadwork') {
+        return r.status != 'ok';
+      }
+      if (r.type == 'event') {
+        return !nightMove && r.status != 'ok';
+      }
+      return false;
+    }).toList();
+
+    final critical = conflicts.where((c) => c.status == 'closed').length;
+    final restricted = conflicts.where((c) => c.status == 'restricted').length;
+
+    int score = (100 - critical * 60 - restricted * 25).clamp(0, 100);
+    String verdict = 'ok';
+    if (score < 40 || critical > 0) verdict = 'blocked';
+    else if (score < 75 || restricted > 0) verdict = 'caution';
+
+    return {
+      'score': score,
+      'verdict': verdict,
+      'conflicts': conflicts,
+    };
+  }
+}
+
+String _fmt(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
